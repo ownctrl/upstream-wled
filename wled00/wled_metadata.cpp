@@ -4,7 +4,11 @@
 
 #ifndef WLED_VERSION
   #warning WLED_VERSION was not set - using default value of 'dev'
-  #define WLED_VERSION dev
+  //#define WLED_VERSION dev
+  #define WLED_VERSION 17.0.0-devV5  // ToDO: remove once that set_metadata.py is fixed for V5
+  #if !defined(WLED_REPO)
+    #define WLED_REPO "wled/wled"    // ToDO: remove once that set_metadata.py is fixed for V5
+  #endif
 #endif
 #ifndef WLED_RELEASE_NAME
   #warning WLED_RELEASE_NAME was not set - using default value of 'Custom'
@@ -122,35 +126,40 @@ bool findWledMetadata(const uint8_t* binaryData, size_t dataSize, wled_metadata_
 }
 
 
+// Strip "_V4" suffix from a release name to allow upgrading between IDF v4 and newer IDF builds.
+static String normalizeReleaseName(const String& name) {
+  if (name.endsWith("_V4")) return name.substring(0, name.length() - 3);
+  return name;
+}
+
+template<size_t len>
+static inline String bufToString(const char (&buf)[len]) {
+  char sbuf[len+1];
+  size_t real_len = strnlen(buf, len);
+  memcpy(sbuf, buf, real_len);
+  sbuf[len] = '\0';
+  return sbuf;
+}
+
 /**
  * Check if OTA should be allowed based on release compatibility using custom description
- * @param binaryData Pointer to binary file data (not modified)
- * @param dataSize Size of binary data in bytes
+ * @param firmwareDescription Description object from proposed new firmware
  * @param errorMessage Buffer to store error message if validation fails 
  * @param errorMessageLen Maximum length of error message buffer
  * @return true if OTA should proceed, false if it should be blocked
  */
-
 bool shouldAllowOTA(const wled_metadata_t& firmwareDescription, char* errorMessage, size_t errorMessageLen) {
   // Clear error message
   if (errorMessage && errorMessageLen > 0) {
     errorMessage[0] = '\0';
   }
 
-  // Validate compatibility using extracted release name
-  // We make a stack copy so we can print it safely
-  char safeFirmwareRelease[WLED_RELEASE_NAME_MAX_LEN];
-  strncpy(safeFirmwareRelease, firmwareDescription.release_name, WLED_RELEASE_NAME_MAX_LEN - 1);
-  safeFirmwareRelease[WLED_RELEASE_NAME_MAX_LEN - 1] = '\0';
+  const String uploadedRelease = bufToString(firmwareDescription.release_name);
   
-  if (strlen(safeFirmwareRelease) == 0) {
-    return false;
-  }  
-
-  if (strncmp_P(safeFirmwareRelease, releaseString, WLED_RELEASE_NAME_MAX_LEN) != 0) {
+  if (normalizeReleaseName(uploadedRelease) != normalizeReleaseName(releaseString)) {
     if (errorMessage && errorMessageLen > 0) {
-      snprintf_P(errorMessage, errorMessageLen, PSTR("Firmware release name mismatch: current='%s', uploaded='%s'."), 
-               releaseString, safeFirmwareRelease);
+      snprintf_P(errorMessage, errorMessageLen, PSTR("Firmware release name mismatch: current='%s', uploaded='%s'."),
+                releaseString, uploadedRelease.c_str());
       errorMessage[errorMessageLen - 1] = '\0'; // Ensure null termination
     }
     return false;
